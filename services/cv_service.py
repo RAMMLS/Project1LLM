@@ -270,9 +270,9 @@ class CVService:
                 self.append_training_log(f"data.yaml: {yaml_path}")
                 self.append_training_log("=== DATASET READY ===")
 
-                if not self.model:
-                    self.model = YOLOVisionModel(config.MODEL_TYPE)
+                self.model = YOLOVisionModel(config.MODEL_TYPE)
                 self.append_training_log(f"Модель: {config.MODEL_TYPE}")
+                self.append_training_log("YOLO модель переинициализирована перед стартом обучения.")
                 self.append_training_log("=== ULTRALYTICS TRAIN START ===")
                 self.set_training_phase("training")
 

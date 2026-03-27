@@ -25,11 +25,18 @@ class YOLOVisionModel:
         :param model_name: Название модели или путь к весам (.pt).
         """
         try:
+            self.model_name = model_name
             self.model = YOLO(model_name)
             logger.info(f"YOLO модель {model_name} успешно инициализирована.")
         except Exception as e:
             logger.error(f"Ошибка при инициализации YOLO: {e}")
             raise
+
+    def _ensure_trainable_model(self) -> None:
+        if getattr(self.model, "overrides", {}).get("model"):
+            return
+        logger.warning("YOLO overrides['model'] отсутствует, переинициализируем модель перед обучением.")
+        self.model = YOLO(self.model_name)
 
     def train(self, data_yaml_path: str, epochs: int = 1, device: str = 'cpu', fraction: float = 0.2, **kwargs) -> Dict[str, Any]:
         """
@@ -43,6 +50,7 @@ class YOLOVisionModel:
         """
         logger.info(f"Начинаем обучение на {epochs} эпох на устройстве {device} с fraction={fraction}...")
         try:
+            self._ensure_trainable_model()
             results = self.model.train(
                 data=data_yaml_path,
                 epochs=epochs,
