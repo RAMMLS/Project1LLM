@@ -1,20 +1,98 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 import asyncio
 import json
+import logging
 import torch
 import torch.nn as nn
 
-from models import VisionModel, SpectrumModel, MathModel
+from models import VisionModel, YOLOVisionModel, SpectrumModel, MathModel
+from services.cv_service import CVService
+from config import config
 
 router = APIRouter()
 
-# Хранилище активных моделей в памяти
+# Хранилище активных моделей и сервисов в памяти
 active_models = {}
+cv_service = CVService()
+
+def _get_device_label() -> str:
+    return "GPU" if GPU_AVAILABLE else "CPU"
+
+def _build_training_graph(mode: str, model) -> List[str]:
+    if mode == 'vision':
+        output_dim = model.base_model.fc.out_features if model.model_type == 'resnet50' else model.base_model.classifier[1].out_features
+        backbone = 'ResNet Bottleneck Blocks x16' if model.model_type == 'resnet50' else 'EfficientNet MBConv Blocks'
+        head = f'Linear(out={output_dim})'
+        return ['Input: Tensor(3, 224, 224)', backbone, 'AdaptiveAvgPool', head, 'CrossEntropyLoss']
+    if mode == 'spectrum':
+        return [
+            f'Input: Tensor({model.conv1.in_channels}, 1024)',
+            f'Conv1d(16, kernel={model.kernel_size})',
+            'ReLU & MaxPool1d',
+            f'Conv1d(32, kernel={model.kernel_size})',
+            'AdaptiveAvgPool1d',
+            f'Linear(out={model.fc2.out_features})',
+            'CrossEntropyLoss'
+        ]
+    if model.model_type == 'rnn':
+        return [
+            f'Input: Tensor(seq_len, {model.rnn.input_size})',
+            f'RNN(hidden={model.rnn.hidden_size}, layers={model.rnn.num_layers})',
+            f'Linear(out={model.fc.out_features})',
+            'MSELoss'
+        ]
+    first_linear = model.network[0]
+    last_linear = model.network[-1]
+    return [
+        f'Input: Tensor({first_linear.in_features})',
+        f'Linear(in={first_linear.in_features}, out={first_linear.out_features})',
+        model.activation_str.upper(),
+        f'Linear(out={last_linear.out_features})',
+        'MSELoss'
+    ]
+
+def _build_training_batch(mode: str, model):
+    if mode == 'vision':
+        num_classes = model.base_model.fc.out_features if model.model_type == 'resnet50' else model.base_model.classifier[1].out_features
+        x = torch.randn(4, 3, 224, 224)
+        y = torch.randint(0, num_classes, (4,), dtype=torch.long)
+        return x, y
+    if mode == 'spectrum':
+        x = torch.randn(16, model.conv1.in_channels, 1024)
+        y = torch.randint(0, model.fc2.out_features, (16,), dtype=torch.long)
+        return x, y
+    if model.model_type == 'rnn':
+        batch_size = 32
+        sequence_length = 12
+        x = torch.randn(batch_size, sequence_length, model.rnn.input_size)
+        y = torch.randn(batch_size, model.fc.out_features)
+        return x, y
+    first_linear = model.network[0]
+    last_linear = model.network[-1]
+    x = torch.randn(32, first_linear.in_features)
+    y = torch.randn(32, last_linear.out_features)
+    return x, y
 
 # --- Pydantic модели (схемы запросов для валидации) ---
+class YOLOInitRequest(BaseModel):
+    model_type: str = 'yolo11n.pt'
+
+class YOLOTrainRequest(BaseModel):
+    epochs: Optional[int] = None
+    dataset_id: Optional[str] = None
+    device: Optional[str] = None
+    fraction: Optional[float] = None
+
+class YOLOConfigRequest(BaseModel):
+    epochs: Optional[int] = None
+    dataset_id: Optional[str] = None
+    model_type: Optional[str] = None
+    device: Optional[str] = None
+    fraction: Optional[float] = None
+
 class VisionConfigRequest(BaseModel):
     model_type: str = 'resnet50'
     num_classes: int = 2
@@ -43,6 +121,127 @@ def initialize_vision_model(config: VisionConfigRequest):
         return {"status": "success", "message": f"{config.model_type} инициализирована для 2D Vision."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/vision/yolo/initialize")
+def initialize_yolo_model(config_req: YOLOInitRequest):
+    print(f"DEBUG: Received initialization request for {config_req.model_type}")
+    try:
+        from models.vision_yolo import YOLOVisionModel
+        model = YOLOVisionModel(model_name=config_req.model_type)
+        active_models['yolo'] = model
+        config.update(MODEL_TYPE=config_req.model_type)
+        print(f"DEBUG: Successfully initialized YOLO {config_req.model_type}")
+        return {"status": "success", "message": f"YOLO {config_req.model_type} инициализирована."}
+    except Exception as e:
+        print(f"DEBUG: Error initializing YOLO: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/vision/yolo/config")
+def get_yolo_config():
+    return {
+        "epochs": config.EPOCHS,
+        "dataset_id": config.DATASET_ID,
+        "model_type": config.MODEL_TYPE,
+        "device": config.DEVICE,
+        "extract_dir": config.EXTRACT_DIR,
+        "fraction": config.FRACTION
+    }
+
+@router.post("/vision/yolo/config")
+def update_yolo_config(config_req: YOLOConfigRequest):
+    update_data = {k: v for k, v in config_req.dict().items() if v is not None}
+    config.update(**update_data)
+    return {"status": "success", "message": "Конфигурация обновлена", "current_config": get_yolo_config()}
+
+@router.get("/vision/yolo/dataset/stats")
+def get_yolo_dataset_stats():
+    return cv_service.get_dataset_stats()
+
+@router.get("/vision/yolo/dataset/samples")
+def get_yolo_samples(subset: str = "train", num: int = 5):
+    samples = cv_service.get_random_samples(subset=subset, num_samples=num)
+    return {"subset": subset, "samples": samples}
+
+@router.post("/vision/yolo/train")
+async def train_yolo(config_req: YOLOTrainRequest, background_tasks: BackgroundTasks):
+    try:
+        print(f"DEBUG: Starting training request: {config_req}")
+        dataset_id = config_req.dataset_id or config.DATASET_ID
+        cv_service.start_training_session(
+            dataset_id=dataset_id,
+            epochs=config_req.epochs,
+            device=config_req.device,
+            fraction=config_req.fraction
+        )
+
+        background_tasks.add_task(
+            cv_service.start_training,
+            dataset_id=dataset_id,
+            epochs=config_req.epochs,
+            device=config_req.device,
+            fraction=config_req.fraction
+        )
+        
+        print("DEBUG: Training task added to background")
+        return {
+            "status": "success", 
+            "message": "Обучение YOLO запущено в фоновом режиме. Терминал подключится к логам автоматически.",
+            "dataset_id": dataset_id
+        }
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        print(f"DEBUG: Error starting training: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/vision/yolo/stream")
+async def stream_yolo_training():
+    async def event_generator():
+        cursor = 0
+        idle_cycles = 0
+        while True:
+            state = cv_service.get_training_state(cursor)
+            for log_line in state["logs"]:
+                yield f"data: {json.dumps({'log': log_line, 'phase': state['phase']})}\n\n"
+            cursor = state["next_index"]
+
+            if not state["is_active"] and cursor > 0:
+                yield f"data: {json.dumps({'done': True, 'phase': state['phase']})}\n\n"
+                break
+
+            if not state["is_active"] and cursor == 0:
+                idle_cycles += 1
+                if idle_cycles >= 20:
+                    yield f"data: {json.dumps({'error': 'Поток логов YOLO не получил данных от процесса обучения.', 'phase': state['phase']})}\n\n"
+                    break
+            else:
+                idle_cycles = 0
+
+            yield ": keepalive\n\n"
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+@router.get("/vision/yolo/state")
+def get_yolo_training_state():
+    state = cv_service.get_training_state()
+    return {
+        "is_active": state["is_active"],
+        "phase": state["phase"],
+        "log_count": state["next_index"]
+    }
 
 @router.post("/vision/freeze")
 def freeze_vision_model():
@@ -172,31 +371,12 @@ async def real_stream_training(mode: str):
         yield f"data: {json.dumps({'log': f'Инициализация глубокого обучения для режима: {mode.upper()}...'})}\n\n"
         yield f"data: {json.dumps({'log': f'Оптимизатор: Adam, Loss: {criterion.__class__.__name__}'})}\n\n"
         
-        # Отправляем структуру графа (архитектуру) в виде красивого массива шагов
         yield f"data: {json.dumps({'log': 'Строим граф вычислений (Forward Pass):'})}\n\n"
-        if mode == 'vision':
-            yield f"data: {json.dumps({'graph': ['Input: Tensor(3, 224, 224)', 'Conv2d(64, kernel=7)', 'BatchNorm2d & ReLU', 'MaxPool2d', 'ResNet Bottleneck Blocks x16', 'AdaptiveAvgPool2d', 'Linear(in=2048, out=2)', 'CrossEntropyLoss']})}\n\n"
-        elif mode == 'spectrum':
-            yield f"data: {json.dumps({'graph': ['Input: Tensor(1, 1024)', 'Conv1d(16, kernel=3)', 'ReLU & MaxPool1d', 'Conv1d(32, kernel=3)', 'ReLU & MaxPool1d', 'AdaptiveAvgPool1d', 'Flatten', 'Linear(out=5)', 'CrossEntropyLoss']})}\n\n"
-        else:
-            yield f"data: {json.dumps({'graph': ['Input: Tensor(10)', 'Linear(in=10, out=64)', 'ReLU', 'Linear(in=64, out=32)', 'ReLU', 'Linear(in=32, out=1)', 'MSELoss']})}\n\n"
+        yield f"data: {json.dumps({'graph': _build_training_graph(mode, model)})}\n\n"
 
         for epoch in range(1, epochs + 1):
             try:
-                # Настоящие PyTorch тензоры, прогоняемые через настоящую архитектуру модели
-                if mode == 'vision':
-                    # Уменьшенный батч для CPU (4 картинки 3x224x224)
-                    x = torch.randn(4, 3, 224, 224) 
-                    y = torch.randint(0, 2, (4,))
-                elif mode == 'spectrum':
-                    # Батч из 16 спектрограмм
-                    x = torch.randn(16, 1, 1024)
-                    y = torch.randint(0, 5, (16,))
-                else: # math
-                    # Батч из 32 последовательностей/векторов
-                    x = torch.randn(32, 10)
-                    y = torch.randn(32, 1)
-
+                x, y = _build_training_batch(mode, model)
                 optimizer.zero_grad()
                 outputs = model(x)
                 
@@ -204,6 +384,7 @@ async def real_stream_training(mode: str):
                     loss = criterion(outputs.view(-1), y.view(-1))
                     acc = max(0.0, 1.0 - loss.item()) 
                 else:
+                    # Fix dimension mismatch: cross entropy expects 1D targets
                     loss = criterion(outputs, y)
                     _, preds = torch.max(outputs, 1)
                     acc = (preds == y).float().mean().item()
@@ -211,7 +392,7 @@ async def real_stream_training(mode: str):
                 loss.backward()
                 optimizer.step()
 
-                log_msg = f"Эпоха [{epoch}/{epochs}] | Loss: {loss.item():.4f} | Точность: {acc*100:.1f}% | Память: {'GPU' if torch.cuda.is_available() else 'CPU'} OK"
+                log_msg = f"Эпоха [{epoch}/{epochs}] | Loss: {loss.item():.4f} | Точность: {acc*100:.1f}% | Устройство: {_get_device_label()} OK"
                 
                 data = {
                     "epoch": epoch,
@@ -240,12 +421,21 @@ async def real_stream_training(mode: str):
         }
     )
 
+# Предварительно кэшируем доступность GPU, чтобы не вешать эндпоинт /status при опросе
+try:
+    import torch
+    GPU_AVAILABLE = torch.cuda.is_available()
+except ImportError:
+    GPU_AVAILABLE = False
+
 @router.get("/status")
 def get_system_status():
-    import torch
-    gpu_available = torch.cuda.is_available()
+    yolo_state = cv_service.get_training_state()
     return {
         "status": "online",
-        "gpu_support": gpu_available,
-        "framework": "PyTorch"
+        "gpu_support": GPU_AVAILABLE,
+        "framework": "PyTorch",
+        "device": _get_device_label(),
+        "yolo_phase": yolo_state["phase"],
+        "yolo_active": yolo_state["is_active"]
     }

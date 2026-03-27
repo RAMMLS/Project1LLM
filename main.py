@@ -11,7 +11,7 @@ app = FastAPI(
 # Configure CORS for Frontend integration (React/Next.js)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins for dev
+    allow_origins=["*"],  # Разрешаем все для устранения ERR_ABORTED
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,4 +26,5 @@ def read_root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # Запуск на localhost:8000, так как это решает большинство проблем в Windows с сетевыми экранами
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)

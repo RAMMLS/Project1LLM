@@ -1,0 +1,28 @@
+# Используем официальный образ Node.js
+FROM node:20-alpine AS base
+
+ARG BACKEND_INTERNAL_URL=http://127.0.0.1:8000
+ENV BACKEND_INTERNAL_URL=$BACKEND_INTERNAL_URL
+ARG NEXT_PUBLIC_STREAM_API_URL=/api/v1
+ENV NEXT_PUBLIC_STREAM_API_URL=$NEXT_PUBLIC_STREAM_API_URL
+
+# Устанавливаем рабочую директорию
+WORKDIR /app
+
+# Копируем package.json и package-lock.json (если есть)
+COPY package.json package-lock.json* ./
+
+# Устанавливаем зависимости
+RUN npm install
+
+# Копируем исходный код фронтенда
+COPY . .
+
+# Собираем приложение Next.js
+RUN npm run build
+
+# Открываем порт
+EXPOSE 3000
+
+# Запускаем приложение в production-режиме
+CMD ["npm", "run", "start"]

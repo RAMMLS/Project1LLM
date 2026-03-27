@@ -1,5 +1,11 @@
 fastapi
 uvicorn
 pydantic
-torch
-torchvision
+torch --index-url https://download.pytorch.org/whl/cpu
+torchvision --index-url https://download.pytorch.org/whl/cpu
+ultralytics
+kagglehub
+opencv-python-headless
+pyyaml
+python-dotenv
+matplotlib

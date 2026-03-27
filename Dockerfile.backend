@@ -1,0 +1,27 @@
+# Используем официальный образ Python (slim версия для уменьшения размера)
+FROM python:3.11-slim
+
+# Устанавливаем системные зависимости для OpenCV и других библиотек
+RUN apt-get update && apt-get install -y \
+    libgl1 \
+    libglib2.0-0 \
+    libxcb1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем рабочую директорию
+WORKDIR /app
+
+# Копируем файл с зависимостями
+COPY requirements.txt .
+
+# Устанавливаем зависимости с увеличенным таймаутом, так как PyTorch весит много
+RUN pip install --no-cache-dir --default-timeout=1000 -r requirements.txt
+
+# Копируем исходный код бэкенда
+COPY . .
+
+# Открываем порт
+EXPOSE 8000
+
+# Запускаем FastAPI через Uvicorn
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

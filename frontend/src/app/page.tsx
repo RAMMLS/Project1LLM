@@ -1,123 +1,143 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
-import Dashboard from '../components/Dashboard';
-import Visualizer from '../components/Visualizer';
-import InterpretationPanel from '../components/InterpretationPanel';
-import { BrainCircuit, Activity, Settings2, Database } from 'lucide-react';
-import Link from 'next/link';
+import React from 'react';
+import { 
+  ScanSearch, 
+  FlaskConical, 
+  LineChart, 
+  ShieldAlert, 
+  ArrowRight,
+  BrainCircuit,
+  Activity,
+  Layers,
+  Cpu
+} from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
-export default function Home() {
-  const [activeMode, setActiveMode] = useState('vision');
-  const [isInitializing, setIsInitializing] = useState(false);
-  const [systemStatus, setSystemStatus] = useState('offline');
-  
-  // Состояния для реального обучения
-  const [isTraining, setIsTraining] = useState(false);
-  const [trainingTrigger, setTrainingTrigger] = useState(0);
+const modules = [
+  {
+    id: 'vision',
+    title: 'Computer Vision 2D',
+    description: 'Классификация изображений (Кошки/Собаки) и детекция подделок документов с использованием ResNet50/EfficientNet.',
+    icon: ShieldAlert,
+    color: 'text-purple-500',
+    bg: 'bg-purple-500/10',
+    border: 'border-purple-500/20',
+    path: '/deep-learning?mode=vision'
+  },
+  {
+    id: 'yolo',
+    title: 'Object Detection YOLOv11',
+    description: 'Детекция опасных предметов (оружие, ножи) в реальном времени. Портировано из Jupyter Notebook.',
+    icon: ScanSearch,
+    color: 'text-blue-500',
+    bg: 'bg-blue-500/10',
+    border: 'border-blue-500/20',
+    path: '/deep-learning?mode=yolo'
+  },
+  {
+    id: 'spectrum',
+    title: 'Spectroscopy Analysis',
+    description: 'Химический анализ данных спектрометрии с использованием 1D-CNN нейронных сетей.',
+    icon: FlaskConical,
+    color: 'text-emerald-500',
+    bg: 'bg-emerald-500/10',
+    border: 'border-emerald-500/20',
+    path: '/deep-learning?mode=spectrum'
+  },
+  {
+    id: 'math',
+    title: 'Mathematical Sandbox',
+    description: 'Экономическое моделирование и функциональные аппроксимации с помощью MLP и RNN.',
+    icon: LineChart,
+    color: 'text-amber-500',
+    bg: 'bg-amber-500/10',
+    border: 'border-amber-500/20',
+    path: '/deep-learning?mode=math'
+  }
+];
 
-  // Определения режимов
-  const modes = [
-    { id: 'vision', title: 'Подделка документов (2D Зрение)', icon: <BrainCircuit className="w-5 h-5" /> },
-    { id: 'spectrum', title: 'Химия (1D Спектроскопия)', icon: <Activity className="w-5 h-5" /> },
-    { id: 'math', title: 'Экономика (Мат. моделирование)', icon: <Settings2 className="w-5 h-5" /> },
-  ];
+export default function Dashboard() {
+  const router = useRouter();
 
-  // Получение статуса бэкенда при загрузке (пингуем сервак, жив ли он)
-  useEffect(() => {
-    fetch('http://localhost:8000/api/v1/status')
-      .then(res => res.json())
-      .then(data => setSystemStatus(data.status))
-      .catch(() => setSystemStatus('offline'));
-  }, []);
-
-  const handleModeChange = (modeId: string) => {
-    if (isTraining) return; // Если модель щас обучается, блочим переключение режимов от греха подальше
-    setIsInitializing(true);
-    setActiveMode(modeId);
-    
-    // Фейковая задержка для красоты UI (типа что-то грузится)
-    setTimeout(() => {
-      setIsInitializing(false);
-    }, 800);
+  const handleModuleClick = (path: string) => {
+    router.push(path);
   };
 
-  const handleStartTraining = useCallback(() => {
-    setIsTraining(true);
-    setTrainingTrigger(prev => prev + 1);
-  }, []);
-
-  const handleStopTraining = useCallback(() => {
-    setIsTraining(false);
-  }, []);
-
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      {/* Шапка */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-600 p-2 rounded-lg text-white">
-              <BrainCircuit className="w-6 h-6" />
+    <div className="min-h-screen bg-slate-950 text-slate-200">
+      {/* Hero Section */}
+      <div className="relative overflow-hidden border-b border-slate-800 bg-slate-900/20 backdrop-blur-sm">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[120px] -mr-64 -mt-64" />
+        <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-[120px] -ml-64 -mb-64" />
+        
+        <div className="max-w-7xl mx-auto px-6 py-20 relative z-10">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-blue-600 rounded-lg shadow-lg shadow-blue-500/20">
+              <BrainCircuit className="w-6 h-6 text-white" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-slate-900">Единая ИИ Лаборатория</h1>
-              <p className="text-xs text-slate-500 font-medium">Платформа для анализа и обучения</p>
-            </div>
+            <span className="text-sm font-mono font-bold tracking-[0.3em] text-blue-500 uppercase">System Core v1.0</span>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 text-sm font-medium">
-              <div className={`w-2 h-2 rounded-full ${systemStatus === 'online' ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
-              {systemStatus === 'online' ? 'Движок в сети' : 'Движок отключен'}
-            </div>
-          </div>
+          <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight text-white mb-6">
+            AI Lab & <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">Analysis Platform</span>
+          </h1>
+          <p className="text-xl text-slate-400 max-w-2xl leading-relaxed">
+            Профессиональная среда для обучения, тестирования и развертывания нейронных сетей различных архитектур в едином интерфейсе.
+          </p>
         </div>
-      </header>
+      </div>
 
-      {/* Основной контент */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* Левая панель - Управление */}
-          <div className="lg:col-span-3 space-y-6">
-            <Dashboard 
-              modes={modes} 
-              activeMode={activeMode} 
-              onModeChange={handleModeChange} 
-              isInitializing={isInitializing}
-              isTraining={isTraining}
-              onStartTraining={handleStartTraining}
-            />
-            <InterpretationPanel activeMode={activeMode} />
-          </div>
-
-          {/* Правая панель - Визуализатор */}
-          <div className="lg:col-span-9">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden h-full min-h-[600px] flex flex-col">
-              <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <h2 className="text-lg font-semibold text-slate-800">Телеметрия обучения</h2>
-                <div className="flex gap-2">
-                  <span className={`px-2.5 py-1 text-xs font-semibold rounded-md border ${isTraining ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                    {isTraining ? 'Обучение в процессе...' : 'Ожидание'}
-                  </span>
-                  <span className="px-2.5 py-1 bg-purple-50 text-purple-700 text-xs font-semibold rounded-md border border-purple-100">
-                    PyTorch Engine
-                  </span>
+      {/* Grid Section */}
+      <div className="max-w-7xl mx-auto px-6 py-16">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {modules.map((module) => (
+            <div 
+              key={module.id}
+              onClick={() => handleModuleClick(module.path)}
+              className="group relative bg-slate-900 border border-slate-800 rounded-2xl p-8 hover:border-slate-700 hover:bg-slate-800/50 transition-all cursor-pointer overflow-hidden shadow-xl"
+            >
+              <div className={`absolute top-0 right-0 w-32 h-32 ${module.bg} rounded-full blur-3xl -mr-16 -mt-16 opacity-50 group-hover:opacity-100 transition-opacity`} />
+              
+              <div className="relative z-10">
+                <div className={`w-14 h-14 ${module.bg} ${module.border} border rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform`}>
+                  <module.icon className={`w-7 h-7 ${module.color}`} />
+                </div>
+                
+                <h3 className="text-2xl font-bold text-white mb-3 group-hover:text-blue-400 transition-colors">
+                  {module.title}
+                </h3>
+                <p className="text-slate-400 leading-relaxed mb-8">
+                  {module.description}
+                </p>
+                
+                <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-slate-500 group-hover:text-white transition-colors">
+                  Запустить модуль
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
-              <div className="p-6 flex-1 flex flex-col">
-                <Visualizer 
-                  activeMode={activeMode} 
-                  isTraining={isTraining}
-                  trainingTrigger={trainingTrigger}
-                  onStopTraining={handleStopTraining}
-                />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Stats Footer */}
+      <div className="max-w-7xl mx-auto px-6 pb-16">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          {[
+            { label: 'Active Engine', value: 'Online', icon: Activity, color: 'text-emerald-500' },
+            { label: 'Compute Unit', value: 'RTX 4090', icon: Cpu, color: 'text-blue-500' },
+            { label: 'Architecture', value: 'Unified API', icon: Layers, color: 'text-purple-500' }
+          ].map((stat, i) => (
+            <div key={i} className="bg-slate-900/50 border border-slate-800/50 rounded-xl p-4 flex items-center gap-4">
+              <stat.icon className={`w-5 h-5 ${stat.color}`} />
+              <div>
+                <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">{stat.label}</p>
+                <p className="text-sm font-bold text-slate-300">{stat.value}</p>
               </div>
             </div>
-          </div>
-
+          ))}
         </div>
-      </main>
+      </div>
     </div>
   );
 }
